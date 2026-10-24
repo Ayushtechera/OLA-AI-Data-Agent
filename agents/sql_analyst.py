@@ -19,3 +19,9 @@ def curate_question(state: AgentSchema) -> AgentSchema:
     state.curated_ques = response
     return state
 
+
+def prompt_query_context(state: AgentSchema) -> AgentSchema:
+
+    curate_question = state.curated_ques
+
+     
