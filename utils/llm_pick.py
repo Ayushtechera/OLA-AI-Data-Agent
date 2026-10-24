@@ -2,8 +2,6 @@ from langchain_groq import ChatGroq
 from dotenv import load_dotenv
 load_dotenv()
 
-
-
 def pick_llm(level: str):
     """
     Picks the appropriate LLM based on the lvel of the question.
