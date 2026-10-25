@@ -5,10 +5,10 @@ class DatabaseUtil:
     def __init__(self, db_config):
         self.db_config = db_config
         try:
-            self.connetion = psycopg2.connect(**db_config)
+            self.connection = psycopg2.connect(**db_config)
         except Exception as e:
             print(f"Error connecting to the database: {e}")
-            self.connetion = None
+            self.connection = None
 
     def schema_details(self, schema_name):
         """
@@ -21,7 +21,7 @@ class DatabaseUtil:
         try:
             schema_info_context = ""
 
-            connection = self.connetion
+            connection = self.connection
             cursor = connection.cursor()
 
             schema_info_context = f"Database Schema : {schema_name}\n"
@@ -59,23 +59,29 @@ class DatabaseUtil:
                 
         return schema_info_context
 
-    def execute_query(self,query):
+    def execute_sql(self, query):
+        connection = self.connection
+        cursor = None
+
         try:
-            connection = self.connection
+            if connection is None:
+                return "Database connection failed"
+
             cursor = connection.cursor()
             cursor.execute(query)
             result = cursor.fetchall()
-            connection.commit()
+
             return str(result)
+
         except Exception as e:
             print(f"Error executing query: {e}")
-            return None
+            return f"Query execution failed: {e}"
+
         finally:
             if cursor:
-                cursor().close()
+                cursor.close()
             if connection:
                 connection.close()
-
 
 obj = DatabaseUtil({
     "host":"localhost",
