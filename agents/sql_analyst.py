@@ -7,6 +7,7 @@ from utils.llm_pick import pick_llm
 from utils.database import DatabaseUtil
 from Models.schema import AgentSchema,JudgeSchema
 from langchain_core.messages import HumanMessage,AIMessage
+from langgraph.graph import StateGraph,START,END
 
 #---------------------------------------- AI Agent Code ---------------------------------------------------
 
@@ -18,13 +19,13 @@ def curate_question(state: AgentSchema) -> AgentSchema:
 
     response = llm.invoke(f"Curate the following question: {user_question}")
 
-    state.curated_ques = response
+    state.curated_question = response.content
     state.messages = state.messages + [HumanMessage(content=f"{response}")]
     return state
 
 
 def prompt_query_context(state: AgentSchema) -> AgentSchema:
-    curated_question = state.curated_ques
+    curated_question = state.curated_question
 
     conn_details = {
         "host":os.environ["HOST"],
@@ -66,11 +67,12 @@ def prompt_query_context(state: AgentSchema) -> AgentSchema:
 def generate_sql(state: AgentSchema) -> AgentSchema:
 
     prompt = state.prompt_query_context
+    llm = pick_llm("high")
 
-    llm = pick_llm("medium")
+    generate_sql_query = llm.invoke(prompt).content
 
-    generate_sql_query = llm.invoke(prompt)
-
+    # sql_query = generate_sql_query.replace("```sql", "").replace("```", "").strip()
+    
     state.generated_sql_query = generate_sql_query
     return state
 
@@ -99,13 +101,13 @@ def is_safe_sql(state:AgentSchema)->AgentSchema:
 
     response = llm_judge.invoke(prompt).model_dump()  # Get the structured output as a dictionary
     state.is_safe = response['answer']
-    state.commnents = response['comments']
+    state.comments = response['comments']
     return state
 
 
 def canceled_sql(state: AgentSchema) -> AgentSchema:
 
-    comments = state.commnents
+    comments = state.comments
 
     state.final_answer = f"The generated SQL query was deemed unsafe to execute. The reson provided by the judge is : {comments}. Therefore, the SQL query will not be executed"
     state.messages = state.messages + [AIMessage(content=f"{state.final_answer}")]
@@ -127,7 +129,7 @@ def execute_sql(state: AgentSchema)-> AgentSchema:
 
     obj = DatabaseUtil(conn_details)
 
-    execution_result = obj.execute_query(sql_query)
+    execution_result = obj.execute_sql(sql_query)
 
     state.sql_query_execution_result = execution_result
 
@@ -139,7 +141,7 @@ def execute_sql(state: AgentSchema)-> AgentSchema:
 def represent_final_answer(state: AgentSchema) -> AgentSchema:
 
     execution_result = state.sql_query_execution_result
-    curated_question = state.curated_ques
+    curated_question = state.curated_question
 
     llm = pick_llm("low")
 
@@ -159,3 +161,78 @@ def represent_final_answer(state: AgentSchema) -> AgentSchema:
     state.messages = state.messages + [AIMessage(content=f"{llm_response}")]  # Append the final answer to the messages list
 
     return state
+
+
+# ---------------------------------------------Graph Building------------------------------------------------
+
+sql_agent_graph = StateGraph(AgentSchema)
+
+
+
+sql_agent_graph.add_node("curate_question",curate_question)
+sql_agent_graph.add_node("prompt_query_context",prompt_query_context)
+sql_agent_graph.add_node("generate_sql",generate_sql)
+sql_agent_graph.add_node("is_safe_sql",is_safe_sql)
+sql_agent_graph.add_node("canceled_sql",canceled_sql)
+sql_agent_graph.add_node("execute_sql",execute_sql)
+sql_agent_graph.add_node("represent_final_answer",represent_final_answer)
+
+
+sql_agent_graph.add_edge(START,"curate_question")
+sql_agent_graph.add_edge("curate_question","prompt_query_context")
+sql_agent_graph.add_edge("prompt_query_context","generate_sql")
+sql_agent_graph.add_edge("generate_sql","is_safe_sql")
+
+
+def is_safe_sql_edge(state:AgentSchema)->str:
+    is_safe = state.is_safe
+
+    if is_safe.lower() == "yes":
+        return "execute_sql"
+    else:
+        return "canceled_sql"
+
+sql_agent_graph.add_conditional_edges("is_safe_sql",is_safe_sql_edge,
+                                      {
+                                          "execute_sql": "execute_sql",
+                                          "canceled_sql": "canceled_sql"
+                                      })
+
+sql_agent_graph.add_edge("canceled_sql",END)
+sql_agent_graph.add_edge("execute_sql","represent_final_answer")
+sql_agent_graph.add_edge("represent_final_answer",END)
+
+
+sql_analyst = sql_agent_graph.compile()
+
+
+
+if __name__ == "__main__":
+
+    input_schema = {
+        "messages": [],
+        "user_question": "What are the different types of Payment Methods we have in our database",
+        "curated_question": "",
+        "prompt_query_context": "",
+        "generated_sql_query": "",
+        "is_safe": "No",
+        "comments": "",
+        "sql_query_execution_result": "",
+        "final_answer": ""
+    }
+
+      # Execute the Graph
+    sql_analyst_response = sql_analyst.invoke(input_schema)
+
+    print(sql_analyst_response['messages'])  # Print the final output of the graph execution
+    print("********************************")
+
+    print(sql_analyst_response['generated_sql_query'])  # Print the generated SQL query
+
+    print("********************************")
+
+    print(sql_analyst_response['sql_query_execution_result'])  # Print the result of executing the SQL query
+
+    print("********************************")
+
+    print(sql_analyst_response['prompt_query_context'])  # Print the prompt query context
