@@ -17,16 +17,19 @@ def pick_llm(level: str):
     if level.lower() == "low":
         llm = ChatGroq(
             model="openai/gpt-oss-20b",
+            reasoning_effort="low",
             temperature=0
         )
     elif level.lower() == "medium":
         llm = ChatGroq(
             model="qwen/qwen3.8-27b",
+            reasoning_effort="none",
             temperature=0
         )
     elif level.lower() == "high":
         llm = ChatGroq(
             model="openai/gpt-oss-120b",
+            reasoning_effort="low",
             temperature=0
         )
     else:
